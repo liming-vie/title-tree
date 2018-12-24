@@ -53,9 +53,11 @@ class Title:
 
 
 class DocTreeIterator:
-    def __init__(self, root, lines, stack=[], pos=None):
+    def __init__(self, root, lines, stack=None, pos=None):
         self._root = root
         self._lines = lines
+        if not stack:
+            stack = []
         self._stack = stack
         if not pos:
             pos = (root, 0)
@@ -145,7 +147,9 @@ def string_to_value(valstr):
 
 
 class TreeNode:
-    def __init__(self, title_sets=[]):
+    def __init__(self, title_sets=None):
+        if not title_sets:
+            title_sets = []
         self.title_sets = title_sets
 
     def start_pos(self, i):
