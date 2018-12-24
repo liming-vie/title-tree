@@ -10,14 +10,16 @@ from functools import cmp_to_key
 
 def make_title_patterns():
     chinese_values = '([一二三四五六七八九十百千零]+)'
+    digit_values = '[1-9][0-9]*'
     values = ' ?(?P<val>(' + chinese_values + \
-        '|([a-z])|([A-Z])|([1-9][0-9]*))) ?'
+        '|([a-z])|([A-Z])|(' + digit_values + '))) ?'
     pts = [
         '(?P<prefix>第) ?' + values + ' ?(?P<suffix>(节|章|条))',
         '(?P<prefix>议案)(?P<val>'+chinese_values+')',
         '(?P<prefix>（?)' + values + '(?P<suffix>）)',
         '(?P<prefix>\(?)' + values + '(?P<suffix>\))',
-        values + '(?P<suffix>[、\.])',
+        chinese_values + '(?P<suffix>[、\.])',
+        '(?P<val>' + digit_values + '(((\.' + digit_values + ')+)|(?P<suffix>\.?)))',
     ]
     return map(lambda x: re.compile(x), pts)
 
@@ -122,8 +124,10 @@ CHINESE_TO_VALUE_MAP = {'千': 1000, '百': 100, '十': 10, '九': 9, '八': 8, 
 
 
 def string_to_value(valstr):
-    if valstr.isdigit():
-        return int(valstr), '1'
+    if valstr[0].isdigit():
+        if valstr.isdigit():
+            return int(valstr), '1'
+        return int(valstr.rstrip('.').split('.')[-1]), '1'
 
     if is_alpha(valstr[0]):
         cval = ord(valstr[0])
@@ -157,14 +161,15 @@ class TreeNode:
         for i, title_set in enumerate(self.title_sets):
             print (prefix, '----- ' + str(i) + ' -----')
             for t in title_set:
-                print(prefix, t.title_text, t.info.lnum, t.info.idx)
+                print(prefix, t.title_text, t.info.tpl, t.info.lnum, t.info.idx)
                 if t.sub_node:
                     t.sub_node.print_tree(prefix+'\t')
 
 
 class DocTree:
-    def __init__(self, filepath):
+    def __init__(self, filepath, only_match_start=False):
         self.filepath = filepath
+        self._match_start=only_match_start
         self.doc_lines = open(filepath).readlines()
         self._tpl_level = {}
         self.root = self._construct()
@@ -238,12 +243,17 @@ class DocTree:
         for pt in TITLE_PATTERNS:
             for lnum, line in enumerate(self.doc_lines):
                 idx = 0
+                while idx < len(line) and line[idx].isspace():
+                    idx += 1
+                start_idx = idx
                 while idx < len(line):
-                    mt = pt.search(line, idx)
+                    if self._match_start:
+                        if idx != start_idx:
+                            break
+                        mt = pt.match(line, idx)
+                    else:
+                        mt = pt.search(line, idx)
                     if not mt:
-                        break
-
-                    if mt.end() >= len(line) - 2:
                         break
 
                     idx = mt.start()
@@ -252,16 +262,20 @@ class DocTree:
                     tpl = vtype
 
                     if (('prefix' not in groups) or (not groups['prefix'])) and idx > 0:
-                        if ((vtype in ['a', 'A'] and is_alpha(line[idx-1])) or
-                                (vtype == '1' and groups['suffix'] != '、' and line[idx-1].isdigit())):
+                        if ((vtype in ['a', 'A'] and is_alpha(line[idx-1])) or (vtype == '1' and line[idx-1].isdigit())):
                             idx = mt.end()
                             continue
 
-                    if 'suffix' in groups:
-                        if groups['suffix'] in ['，', '.'] and vtype != '一':
+                    if 'suffix' in groups and groups['suffix']:
+                            tpl += groups['suffix']
+                    elif vtype == '1':
+                        l = len(groups['val'].split('.'))
+                        if l > 1:
+                            tpl += '.' + str(l)
+                        elif idx != start_idx:
                             idx = mt.end()
                             continue
-                        tpl += groups['suffix']
+
                     if 'prefix' in groups:
                         tpl = groups['prefix'] + tpl
 
@@ -419,10 +433,10 @@ if __name__ == '__main__':
         print('usage: python3 title_tree.py filepath')
 
     filepath = sys.argv[1]
-    tree = DocTree(filepath)
+    tree = DocTree(filepath, only_match_start=True)
 
     def print_res(res, prefix):
-        print (prefix,  res.title_text, res.start_pos,
+        print (prefix, res.title_text, res.start_pos,
                res.end_pos, res.lines, '\n')
 
     # print tree structure
